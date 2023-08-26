@@ -18,16 +18,19 @@
 #include <mkl.h>
 #include <fftw3.h>
 #include <vector>
+#include <fstream>
+#include<iomanip>
+#pragma warning(disable:4996)
 using namespace std;
 
 // 定义宏
-#define M 8
-#define N 8
+#define M 4096
+#define N 4096
 #define PRINT_LIMIT 10
 #define PI acos(-1.0)
 #define EPSILON 1e-6
 #define REPEAT 1000
-#define RUN_REPEAT false
+#define RUN_REPEAT true
 
 typedef complex<float> Complex;
 
@@ -87,7 +90,8 @@ Complex* matrix_fft_custom = (Complex*)malloc(sizeof(Complex) * M * N);/* save m
 
 
 // Calculate FFT using recursive method
-void fft1d_custom(Complex* mat, int size, int stride) {
+void fft1d_custom(Complex* mat, int size)
+{
 	if (size <= 1)
 		return;
 
@@ -96,50 +100,54 @@ void fft1d_custom(Complex* mat, int size, int stride) {
 	Complex* even = (Complex*)malloc(sizeof(Complex) * halfSize);
 	Complex* odd = (Complex*)malloc(sizeof(Complex) * halfSize);
 
-	for (int i = 0; i < halfSize; ++i) 
+	for (int i = 0; i < halfSize; ++i)
 	{
-		cout << mat[i * stride] << '\t' << mat[(i * stride) + stride] <<'\n' << endl;
-		even[i] = mat[i * stride];
-		odd[i] = mat[(i * stride) + stride];
+		even[i] = mat[i * 2];
+		odd[i] = mat[(i * 2) + 1];
 	}
 
 	// Recursively calculate FFT for even and odd parts
 
-	fft1d_custom(even, halfSize, stride * 2);
-	fft1d_custom(odd, halfSize, stride * 2);
+	fft1d_custom(even, halfSize);
+	fft1d_custom(odd, halfSize);
 
 	// Combine the results
-	for (int i = 0; i < size / 2; ++i) 
+	for (int i = 0; i < halfSize; ++i)
 	{
-		Complex t= { 0, 0 };
-		float angle = -2 * PI * i / size;
+		Complex t = { 0, 0 };
+		float angle =  2 * PI * i / size;
 
 		t.real(cos(angle) * odd[i].real() + sin(angle) * odd[i].imag());
 		t.imag(cos(angle) * odd[i].imag() - sin(angle) * odd[i].real());
-		
-		mat[i * stride].real(even[i].real() + t.real());
-		mat[i * stride].imag(even[i].imag() + t.imag());
 
-		mat[(i + size / 2) * stride].real(even[i].real() - t.real());
-		mat[(i + size / 2) * stride].imag(even[i].imag() - t.imag());
+		mat[i].real(even[i].real() + t.real());
+		mat[i].imag(even[i].imag() + t.imag());
+
+		mat[i + halfSize].real(even[i].real() - t.real());
+		mat[i + halfSize].imag(even[i].imag() - t.imag());
 	}
+
+	free(even);
+	free(odd);
 }
 
 // Perform 2D FFT using recursive method
-void fft2d_custom(Complex* mat) {
+void fft2d_custom(Complex* mat)
+{
 	// Apply FFT on rows
 	for (int i = 0; i < M; ++i)
-		fft1d_custom(mat + i * N, N, 1);
+		fft1d_custom(mat + i * N, N);
 
 	// Apply FFT on columns
-	for (int i = 0; i < N; ++i) 
+	for (int i = 0; i < N; ++i)
 	{
 		Complex* column = (Complex*)malloc(sizeof(Complex) * M);
 		for (int j = 0; j < M; ++j)
 			column[j] = mat[j * N + i];
-		fft1d_custom(column, M, 1);
-		for (int j = 0; j < M; ++j) 
+		fft1d_custom(column, M);
+		for (int j = 0; j < M; ++j)
 			mat[j * N + i] = column[j];
+		free(column);
 	}
 }
 
@@ -266,27 +274,48 @@ int main()
 	print_matrix(matrix, M, N, PRINT_LIMIT);
 
 	// custom
-	/*printf("使用自定义函数进行FFT\n");
+	printf("使用自定义函数进行FFT\n");
 	fft_custom();
-	print_matrix_complex(matrix_fft_custom, M, N, PRINT_LIMIT);*/
+	printf("结果为：\n");
+	print_matrix_complex(matrix_fft_custom, M, N, PRINT_LIMIT);
 
 	// fftw3
 	printf("使用 fftw3 进行FFT\n");
 	fft_fftw3();
+	printf("压缩形式为：\n");
 	print_matrix(matrix_fft_fftw3, M, 2 * (N / 2 + 1), PRINT_LIMIT);
 	fft_fftw3_transform();
+	printf("结果为：\n");
 	print_matrix_complex(matrix_fft_fftw3_trans, M, N, PRINT_LIMIT);
 
 	// mkl
 	printf("使用 oneMKL 进行FFT\n");
 	fft_mkl();
+	printf("压缩形式为：\n");
 	print_matrix_complex(matrix_fft_mkl, M, N, PRINT_LIMIT);
 	fft_mkl_transform();
+	printf("结果为：\n");
 	print_matrix_complex(matrix_fft_mkl_trans, M, N, PRINT_LIMIT);
 
 	// 验证结果
-	printf("最大误差为%f\n", verify(matrix_fft_fftw3_trans, matrix_fft_mkl_trans));
-	if (verify(matrix_fft_fftw3_trans, matrix_fft_mkl_trans) < EPSILON)
+	float error_12 = verify(matrix_fft_custom, matrix_fft_fftw3_trans);
+	float error_13 = verify(matrix_fft_custom, matrix_fft_mkl_trans);
+	float error_23 = verify(matrix_fft_fftw3_trans, matrix_fft_mkl_trans);
+
+	printf("matrix_fft_custom与matrix_fft_fftw3_trans最大误差为 %f\n", error_12);
+	if (error_12 < EPSILON)
+		printf("结果正确\n");
+	else
+		printf("结果不正确\n");
+
+	printf("matrix_fft_custom与matrix_fft_mkl最大误差为 %f\n", error_13);
+	if (error_13 < EPSILON)
+		printf("结果正确\n");
+	else
+		printf("结果不正确\n");
+
+	printf("matrix_fft_fftw3_trans与matrix_fft_mkl最大误差为 %f\n", error_23);
+	if (error_23 < EPSILON)
 		printf("结果正确\n");
 	else
 		printf("结果不正确\n");
@@ -296,31 +325,60 @@ int main()
 
 	// 耗时对比
 	printf("开始耗时对比，矩阵为 %d * %d，共计 %d 轮\n", M, N, REPEAT);
-	auto total_fftw3 = chrono::duration_cast<chrono::milliseconds>(chrono::milliseconds::zero());
-	auto total_mkl = chrono::duration_cast<chrono::milliseconds>(chrono::milliseconds::zero());
+	auto total_custom = chrono::duration_cast<chrono::nanoseconds>(chrono::nanoseconds::zero());
+	auto total_fftw3 = chrono::duration_cast<chrono::nanoseconds>(chrono::nanoseconds::zero());
+	auto total_mkl = chrono::duration_cast<chrono::nanoseconds>(chrono::nanoseconds::zero());
 
 	for (int i = 0; i < REPEAT; i++)
 	{
+		generate_matrix(i);
+		
 		if (i % (int)ceil((float)REPEAT / 10) == 0)
 			printf("第 %d 次运行\n", i + 1);
+		
+			auto start_custom = chrono::high_resolution_clock::now();
+			fft_custom();
+			auto end_custom = chrono::high_resolution_clock::now();
+			total_custom += chrono::duration_cast<chrono::nanoseconds>(end_custom - start_custom);
 
-		generate_matrix(i);
 		auto start_fftw3 = chrono::high_resolution_clock::now();
 		fft_fftw3();
 		auto end_fftw3 = chrono::high_resolution_clock::now();
-		total_fftw3 += chrono::duration_cast<chrono::milliseconds>(end_fftw3 - start_fftw3);
+		total_fftw3 += chrono::duration_cast<chrono::nanoseconds>(end_fftw3 - start_fftw3);
 
 		auto start_mkl = chrono::high_resolution_clock::now();
 		fft_mkl();
 		auto end_mkl = chrono::high_resolution_clock::now();
-		total_mkl += chrono::duration_cast<chrono::milliseconds>(end_mkl - start_mkl);
+		total_mkl += chrono::duration_cast<chrono::nanoseconds>(end_mkl - start_mkl);
 
 		// 我们不考虑transform后处理的时间	
 	}
 
-	printf("fftw3 平均耗时 %.3f ms\n", (float)total_fftw3.count() / REPEAT);
-	printf("mkl 平均耗时 %.3f ms\n", (float)total_mkl.count() / REPEAT);
-	printf("加速比 %f\n", (float)total_fftw3.count() / total_mkl.count());
+	printf("自定义函数平均耗时 %.3e s\n", (double)total_custom.count() / REPEAT * 100 /1e9);
+	printf("fftw3 平均耗时 %.3e s\n", (double)total_fftw3.count() / REPEAT / 1e9);
+	printf("fftw3 加速比 %.3f\n", (double)total_custom.count()/total_fftw3.count());
+	printf("oneMKL 平均耗时 %.3e s\n", (double)total_mkl.count() / REPEAT / 1e9);
+	printf("oneMKL 加速比 %.3f\n", (double)total_custom.count() / total_mkl.count());
+	printf("oneMKL 与 fftw3 加速比 %.3f\n", (double)total_fftw3.count() / total_mkl.count());
+
+	// 将以上数据写入‘readme.md’最后，每个数据三位小数
+	// | Matrix M | Matrix N |  custom  |  fftw3 (acc)  |  oneMKL (acc)  | fftw3/oneMKL |
+	// | :------: | :------: | :----------: | :-----------: | :------------: | :--------------: |
+	// |    64    |    64    |  1.234e-3 s  |  1.234e-2 s (10x)  |   1.234e-1 s (100x)  |     10     |
+	// 只需要输出最后一行即可
+	// fstream readme;
+	// readme.open("readme.md", ios::app);
+
+	// Open the 'readme.md' file for appending
+	FILE* readme = fopen("readme.md", "a");
+	fprintf(readme, "| %d | %d | %.3e s | %.3e s (%.3f x) | %.3e s (%.3f x) | %.3f |\n", M,
+		N,
+		(double)total_custom.count() / REPEAT*100 / 1e9,
+		(double)total_fftw3.count() / REPEAT / 1e9,
+		(double)total_custom.count() / total_fftw3.count(),
+		(double)total_mkl.count() / REPEAT / 1e9,
+		(double)total_custom.count() / total_mkl.count(),
+		(double)total_fftw3.count() / total_mkl.count());
 
 	return 0;
 }

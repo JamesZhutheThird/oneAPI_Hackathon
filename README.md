@@ -3,6 +3,7 @@
 JamesZhutheThird
 
 ## Updates
+- 20230826 v1.1 Add customized FFT (however there are bugs)
 - 20230825 v1.0 Support FFT with `oneMKL` and `fftw3`
 
 ## Performance

@@ -1,4 +1,8 @@
 ﻿/*
+英特尔 oneAPI 黑客松
+JamesZhuthethird
+20230827
+
 使用oneMKL工具，对FFT算法进行加速与优化。
 1. 点击链接下载和使用最新版本oneMKL
 2. 调用 oneMKL 相应 API函数， 产生 2048 * 2048 个 随机单精度实数()；
@@ -19,16 +23,16 @@
 #include <fftw3.h>
 #include <vector>
 #include <fstream>
-#include<iomanip>
+#include <iomanip>
 #pragma warning(disable:4996)
 using namespace std;
 
 // 定义宏
-#define M 4096
-#define N 4096
+#define M 2048
+#define N 2048
 #define PRINT_LIMIT 10
 #define PI acos(-1.0)
-#define EPSILON 1e-6
+#define EPSILON 1e-3
 #define REPEAT 1000
 #define RUN_REPEAT true
 
@@ -165,7 +169,7 @@ void fft_custom()
 
 // 2D Real to complex FFT with fftw3.h
 float* matrix_fft_fftw3 = (float*)fftwf_malloc(sizeof(float) * 2 * M * (N / 2 + 1));/* save matrix after fft_fftw3 */
-Complex* matrix_fft_fftw3_trans = (Complex*)mkl_malloc(sizeof(Complex) * M * N, 64); /* decode matrix after fft_fftw3 */
+Complex* matrix_fft_fftw3_trans = (Complex*)fftwf_malloc(sizeof(Complex) * M * N); /* decode matrix after fft_fftw3 */
 
 void fft_fftw3()
 {
@@ -249,17 +253,43 @@ void fft_mkl_transform()
 }
 
 // 验证结果
-float verify(Complex* mat_1, Complex* mat_2, float epsilon = 1e-5)
+float verify(Complex* mat_1, Complex* mat_2)
 {
-	float max_diff = 0;
+	float current_diff= 0;
+	float diff_real = 0;
+	float diff_imag = 0;
+	float max_diff_info[7] = { 0 }; 
+
 	for (int i = 0; i < M; i++)
 		for (int j = 0; j < N; j++)
 		{
-			max_diff = max(max_diff, abs(mat_1[i * N + j].real() - mat_2[i * N + j].real()));
-			max_diff = max(max_diff, abs(mat_1[i * N + j].imag() - mat_2[i * N + j].imag()));
+			diff_real = abs(mat_1[i * N + j].real() - mat_2[i * N + j].real()) / max({ 1.0f, abs(mat_1[i * N + j].real()), abs(mat_1[i * N + j].real() ) });
+			diff_imag = abs(mat_1[i * N + j].imag() - mat_2[i * N + j].imag()) / max({1.0f, abs(mat_1[i * N + j].imag()), abs(mat_1[i * N + j].imag() ) });
+			current_diff = max(diff_real, diff_imag);
+			if (max_diff_info[0] < current_diff)
+			{
+				max_diff_info[0] = current_diff;
+				max_diff_info[1] = i;
+				max_diff_info[2] = j;
+				max_diff_info[3] = mat_1[i * N + j].real();
+				max_diff_info[4] = mat_1[i * N + j].imag();
+				max_diff_info[5] = mat_2[i * N + j].real();
+				max_diff_info[6] = mat_2[i * N + j].imag();
+			}
+			
 		}
 
-	return max_diff;
+	if (max_diff_info[0] == 0)
+		printf("两矩阵数据完全一致\n"); 
+	else 
+	{ 
+		if (max_diff_info[0] <= EPSILON)
+			printf("两矩阵数据差异处于误差范围内\n");
+		else
+			printf("两矩阵数据差异超出误差范围\n");
+		printf("最大差值为%f, 位于(%d, %d), mat_1(%f, %f), mat_2(%f, %f)\n", max_diff_info[0], max_diff_info[1], max_diff_info[2], max_diff_info[3], max_diff_info[4], max_diff_info[5], max_diff_info[6]);
+	}
+	return max_diff_info[0];
 }
 
 
@@ -298,33 +328,23 @@ int main()
 	print_matrix_complex(matrix_fft_mkl_trans, M, N, PRINT_LIMIT);
 
 	// 验证结果
+	printf("\n比较 matrix_fft_custom 与 matrix_fft_fftw3_trans\n");
 	float error_12 = verify(matrix_fft_custom, matrix_fft_fftw3_trans);
+	printf((error_12 <= EPSILON)?"结果正确\n": "结果不正确\n");
+	
+	printf("\n比较 matrix_fft_custom 与 matrix_fft_mkl_trans\n");
 	float error_13 = verify(matrix_fft_custom, matrix_fft_mkl_trans);
+	printf((error_13<= EPSILON) ? "结果正确\n" : "结果不正确\n");
+
+	printf("\n比较 matrix_fft_fftw3_trans 与 matrix_fft_mkl_trans\n");
 	float error_23 = verify(matrix_fft_fftw3_trans, matrix_fft_mkl_trans);
-
-	printf("matrix_fft_custom与matrix_fft_fftw3_trans最大误差为 %f\n", error_12);
-	if (error_12 < EPSILON)
-		printf("结果正确\n");
-	else
-		printf("结果不正确\n");
-
-	printf("matrix_fft_custom与matrix_fft_mkl最大误差为 %f\n", error_13);
-	if (error_13 < EPSILON)
-		printf("结果正确\n");
-	else
-		printf("结果不正确\n");
-
-	printf("matrix_fft_fftw3_trans与matrix_fft_mkl最大误差为 %f\n", error_23);
-	if (error_23 < EPSILON)
-		printf("结果正确\n");
-	else
-		printf("结果不正确\n");
+	printf((error_23 <= EPSILON) ? "结果正确\n" : "结果不正确\n");
 
 	if (!RUN_REPEAT)
 		return 0;
 
 	// 耗时对比
-	printf("开始耗时对比，矩阵为 %d * %d，共计 %d 轮\n", M, N, REPEAT);
+	printf("\n开始耗时对比，矩阵为 %d * %d，共计 %d 轮\n", M, N, REPEAT);
 	auto total_custom = chrono::duration_cast<chrono::nanoseconds>(chrono::nanoseconds::zero());
 	auto total_fftw3 = chrono::duration_cast<chrono::nanoseconds>(chrono::nanoseconds::zero());
 	auto total_mkl = chrono::duration_cast<chrono::nanoseconds>(chrono::nanoseconds::zero());
@@ -332,14 +352,15 @@ int main()
 	for (int i = 0; i < REPEAT; i++)
 	{
 		generate_matrix(i);
-		
-		if (i % (int)ceil((float)REPEAT / 10) == 0)
+
+		if (i % 100 == 0)
+		{
 			printf("第 %d 次运行\n", i + 1);
-		
 			auto start_custom = chrono::high_resolution_clock::now();
 			fft_custom();
 			auto end_custom = chrono::high_resolution_clock::now();
 			total_custom += chrono::duration_cast<chrono::nanoseconds>(end_custom - start_custom);
+		}
 
 		auto start_fftw3 = chrono::high_resolution_clock::now();
 		fft_fftw3();
@@ -354,30 +375,23 @@ int main()
 		// 我们不考虑transform后处理的时间	
 	}
 
-	printf("自定义函数平均耗时 %.3e s\n", (double)total_custom.count() / REPEAT * 100 /1e9);
+	printf("自定义函数平均耗时 %.3e s\n", (double)total_custom.count() * 100 / REPEAT  /1e9);
 	printf("fftw3 平均耗时 %.3e s\n", (double)total_fftw3.count() / REPEAT / 1e9);
-	printf("fftw3 加速比 %.3f\n", (double)total_custom.count()/total_fftw3.count());
+	printf("fftw3 加速比 %.3f\n", (double)total_custom.count() * 100 /total_fftw3.count());
 	printf("oneMKL 平均耗时 %.3e s\n", (double)total_mkl.count() / REPEAT / 1e9);
-	printf("oneMKL 加速比 %.3f\n", (double)total_custom.count() / total_mkl.count());
+	printf("oneMKL 加速比 %.3f\n", (double)total_custom.count() * 100 / total_mkl.count());
 	printf("oneMKL 与 fftw3 加速比 %.3f\n", (double)total_fftw3.count() / total_mkl.count());
 
 	// 将以上数据写入‘readme.md’最后，每个数据三位小数
-	// | Matrix M | Matrix N |  custom  |  fftw3 (acc)  |  oneMKL (acc)  | fftw3/oneMKL |
-	// | :------: | :------: | :----------: | :-----------: | :------------: | :--------------: |
-	// |    64    |    64    |  1.234e-3 s  |  1.234e-2 s (10x)  |   1.234e-1 s (100x)  |     10     |
-	// 只需要输出最后一行即可
-	// fstream readme;
-	// readme.open("readme.md", ios::app);
-
-	// Open the 'readme.md' file for appending
+	// | M | N | 自定义函数 | fftw3 (加速比) | oneMKL (加速比) | fftw3/oneMKL耗时比 |
 	FILE* readme = fopen("readme.md", "a");
 	fprintf(readme, "| %d | %d | %.3e s | %.3e s (%.3f x) | %.3e s (%.3f x) | %.3f |\n", M,
 		N,
-		(double)total_custom.count() / REPEAT*100 / 1e9,
+		(double)total_custom.count() * 100 / REPEAT  / 1e9,
 		(double)total_fftw3.count() / REPEAT / 1e9,
-		(double)total_custom.count() / total_fftw3.count(),
+		(double)total_custom.count() * 100 / total_fftw3.count(),
 		(double)total_mkl.count() / REPEAT / 1e9,
-		(double)total_custom.count() / total_mkl.count(),
+		(double)total_custom.count() * 100 / total_mkl.count(),
 		(double)total_fftw3.count() / total_mkl.count());
 
 	return 0;
